@@ -365,11 +365,31 @@ def monitor_loop():
 
 if __name__ == '__main__':
     # Validate required configuration
+    print("🔍 Checking configuration...")
+
+    errors = []
     if not WEBSITE_URL:
-        print("❌ Error: WEBSITE_URL not configured in .env")
+        errors.append("WEBSITE_URL not set")
+    if not TELEGRAM_BOT_TOKEN:
+        errors.append("TELEGRAM_BOT_TOKEN not set")
+    if not TELEGRAM_CHAT_ID:
+        errors.append("TELEGRAM_CHAT_ID not set")
+
+    if errors:
+        print("❌ Configuration errors:")
+        for error in errors:
+            print(f"   - {error}")
+        print("\n💡 Please set these environment variables and try again")
+        print("📚 See .env.example for reference")
         exit(1)
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("⚠️ Warning: Telegram not configured. Notifications will not work.")
+
+    print("✅ Configuration validated")
 
     # Start monitoring
-    monitor_loop()
+    try:
+        monitor_loop()
+    except Exception as e:
+        print(f"❌ Fatal error: {e}")
+        import traceback
+        traceback.print_exc()
+        exit(1)
