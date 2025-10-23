@@ -27,6 +27,10 @@ EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD', '')
 SMTP_SERVER = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
 SMTP_PORT = int(os.getenv('SMTP_PORT', 587))
 
+# Content validation settings
+MIN_CONTENT_LENGTH = int(os.getenv('MIN_CONTENT_LENGTH', 1000))  # Minimum bytes expected in response
+REQUIRED_CONTENT = os.getenv('REQUIRED_CONTENT', '')  # Optional: specific text that must be present
+
 # Statistics tracking
 stats = {
     'total_checks': 0,
@@ -94,27 +98,61 @@ def send_email(subject, body):
 def check_website():
     """
     Check website availability and measure response time
-    Returns dict with: is_up, status_code, response_time, error
+    Validates that we receive full HTML content, not just a status code
+    Returns dict with: is_up, status_code, response_time, error, content_length
     """
     try:
         start_time = time.time()
         response = requests.get(WEBSITE_URL, timeout=10)
         response_time = (time.time() - start_time) * 1000  # Convert to milliseconds
 
-        # Consider 2xx and 3xx status codes as "up"
-        is_up = response.status_code < 400
+        # Get content length
+        content_length = len(response.content)
 
+        # Check 1: HTTP status code must be < 400
+        if response.status_code >= 400:
+            return {
+                'is_up': False,
+                'status_code': response.status_code,
+                'response_time': response_time,
+                'content_length': content_length,
+                'error': f"HTTP {response.status_code}"
+            }
+
+        # Check 2: Content length must meet minimum requirement
+        if content_length < MIN_CONTENT_LENGTH:
+            return {
+                'is_up': False,
+                'status_code': response.status_code,
+                'response_time': response_time,
+                'content_length': content_length,
+                'error': f"Content too short ({content_length} bytes, expected >{MIN_CONTENT_LENGTH})"
+            }
+
+        # Check 3: Optional - specific content must be present
+        if REQUIRED_CONTENT and REQUIRED_CONTENT not in response.text:
+            return {
+                'is_up': False,
+                'status_code': response.status_code,
+                'response_time': response_time,
+                'content_length': content_length,
+                'error': f"Required content '{REQUIRED_CONTENT}' not found"
+            }
+
+        # All checks passed
         return {
-            'is_up': is_up,
+            'is_up': True,
             'status_code': response.status_code,
             'response_time': response_time,
-            'error': None if is_up else f"HTTP {response.status_code}"
+            'content_length': content_length,
+            'error': None
         }
     except requests.exceptions.Timeout:
         return {
             'is_up': False,
             'status_code': 0,
             'response_time': None,
+            'content_length': 0,
             'error': 'Connection timeout'
         }
     except requests.exceptions.ConnectionError:
@@ -122,6 +160,7 @@ def check_website():
             'is_up': False,
             'status_code': 0,
             'response_time': None,
+            'content_length': 0,
             'error': 'Connection failed'
         }
     except Exception as e:
@@ -129,6 +168,7 @@ def check_website():
             'is_up': False,
             'status_code': 0,
             'response_time': None,
+            'content_length': 0,
             'error': str(e)
         }
 
@@ -151,6 +191,9 @@ def send_down_alert(result):
     """Send alert when website goes down"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
+    # Include content length in alert if available
+    content_info = f"\n📏 Content: {result['content_length']} bytes" if result.get('content_length', 0) > 0 else ""
+
     # Telegram message with HTML formatting
     telegram_msg = f"""
 🚨 <b>WEBSITE DOWN!</b>
@@ -158,7 +201,7 @@ def send_down_alert(result):
 🌐 {WEBSITE_URL}
 ❌ Status: DOWN
 📊 Code: {result['status_code']}
-⚠️ Error: {result['error']}
+⚠️ Error: {result['error']}{content_info}
 ⏰ {timestamp}
 """
 
@@ -171,6 +214,7 @@ URL: {WEBSITE_URL}
 Status: DOWN
 Status Code: {result['status_code']}
 Error: {result['error']}
+Content Length: {result.get('content_length', 0)} bytes
 Time: {timestamp}
 
 This is an automated alert from your website monitoring system.
@@ -178,7 +222,7 @@ This is an automated alert from your website monitoring system.
 
     send_telegram(telegram_msg)
     send_email(email_subject, email_body)
-    print(f"🚨 DOWN | {result['error']} | {timestamp}")
+    print(f"🚨 DOWN | {result['error']} | {result.get('content_length', 0)}B | {timestamp}")
 
 
 def send_recovery_alert(result):
@@ -334,7 +378,8 @@ def monitor_loop():
                     stats['down_since'] = None
 
                 stats['is_up'] = True
-                print(f"✅ UP | {result['response_time']:.2f}ms | {timestamp}")
+                content_size = result.get('content_length', 0) / 1024  # Convert to KB
+                print(f"✅ UP | {result['response_time']:.2f}ms | {content_size:.1f}KB | {timestamp}")
             else:
                 stats['failed_checks'] += 1
 
