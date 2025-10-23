@@ -8,10 +8,12 @@ import os
 import time
 import requests
 import smtplib
+import threading
 from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from dotenv import load_dotenv
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Load environment variables
 load_dotenv()
@@ -408,6 +410,54 @@ def monitor_loop():
             time.sleep(CHECK_INTERVAL)
 
 
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    """
+    Simple HTTP handler for health checks
+    Responds to DigitalOcean health check pings
+    """
+
+    def do_GET(self):
+        """Handle GET requests"""
+        if self.path == '/' or self.path == '/health':
+            # Respond with 200 OK and status information
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+
+            uptime = calculate_uptime()
+            status = "UP" if stats['is_up'] else "DOWN" if stats['is_up'] is not None else "STARTING"
+
+            response = f"""
+            <html>
+            <head><title>Website Monitor Status</title></head>
+            <body>
+                <h1>Website Monitor - Running</h1>
+                <p><strong>Monitoring:</strong> {WEBSITE_URL}</p>
+                <p><strong>Current Status:</strong> {status}</p>
+                <p><strong>Uptime:</strong> {uptime:.2f}%</p>
+                <p><strong>Total Checks:</strong> {stats['total_checks']}</p>
+                <p><strong>Check Interval:</strong> {CHECK_INTERVAL}s</p>
+            </body>
+            </html>
+            """
+            self.wfile.write(response.encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        """Suppress health check logs to avoid clutter"""
+        pass
+
+
+def start_health_server():
+    """Start HTTP server for health checks on port 8080"""
+    port = int(os.getenv('PORT', 8080))
+    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+    print(f"🏥 Health check server started on port {port}")
+    server.serve_forever()
+
+
 if __name__ == '__main__':
     # Validate required configuration
     print("🔍 Checking configuration...")
@@ -430,7 +480,11 @@ if __name__ == '__main__':
 
     print("✅ Configuration validated")
 
-    # Start monitoring
+    # Start health check server in background thread
+    health_thread = threading.Thread(target=start_health_server, daemon=True)
+    health_thread.start()
+
+    # Start monitoring (runs in main thread)
     try:
         monitor_loop()
     except Exception as e:
