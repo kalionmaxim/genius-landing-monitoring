@@ -54,7 +54,8 @@ stats = {
     'is_up': None,  # Current state: None (unknown), True (up), False (down)
     'down_since': None,  # Timestamp when site went down
     'last_report_minute': -1,  # Track last report minute to avoid duplicates
-    'checks_this_interval': 0
+    'checks_this_interval': 0,
+    'last_check_result': None,  # Store latest check result for reports
 }
 
 
@@ -313,7 +314,7 @@ Your website is back online!
 
 
 def send_hourly_report():
-    """Send hourly status report with statistics"""
+    """Send periodic status report with statistics"""
     timestamp = format_timestamp()
     uptime = calculate_uptime()
     avg_response = calculate_avg_response_time()
@@ -321,14 +322,27 @@ def send_hourly_report():
     current_status = "UP" if stats['is_up'] else "DOWN"
     status_emoji = "✅" if stats['is_up'] else "❌"
 
+    # Get latest check information
+    last_check = stats.get('last_check_result', {})
+    status_code = last_check.get('status_code', 0)
+    content_length = last_check.get('content_length', 0)
+    content_kb = content_length / 1024 if content_length > 0 else 0
+
+    # Build HTTP status info
+    http_info = f"\n📄 HTTP: {status_code}"
+    if content_length > 0:
+        http_info += f" | {content_kb:.1f}KB"
+
     # Telegram message
     telegram_msg = f"""
 📊 <b>Status Report</b>
 
 🌐 Website: {WEBSITE_URL}
-{status_emoji} Status: {current_status}
+{status_emoji} Status: {current_status}{http_info}
 📈 Uptime: {uptime:.2f}%
 ⏱ Avg Response Time: {avg_response:.0f}ms
+
+📋 Checks this interval: {stats['checks_this_interval']}
 🔍 Total Checks: {stats['total_checks']}
 ❌ Failed: {stats['failed_checks']}
 
@@ -342,8 +356,13 @@ STATUS REPORT
 
 Website: {WEBSITE_URL}
 Current Status: {current_status}
+HTTP Status: {status_code}
+Content Size: {content_kb:.1f}KB
+
 Uptime: {uptime:.2f}%
 Average Response Time: {avg_response:.0f}ms
+
+Checks This Interval: {stats['checks_this_interval']}
 Total Checks: {stats['total_checks']}
 Failed Checks: {stats['failed_checks']}
 
@@ -408,7 +427,8 @@ def monitor_loop():
 
             # Update statistics
             stats['total_checks'] += 1
-            stats['checks_this_hour'] += 1
+            stats['checks_this_interval'] += 1
+            stats['last_check_result'] = result  # Store for reports
 
             if result['is_up']:
                 stats['successful_checks'] += 1
