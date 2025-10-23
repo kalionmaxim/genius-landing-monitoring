@@ -9,6 +9,7 @@ import time
 import requests
 import smtplib
 import threading
+import pytz
 from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -29,6 +30,14 @@ EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD', '')
 SMTP_SERVER = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
 SMTP_PORT = int(os.getenv('SMTP_PORT', 587))
 
+# Timezone configuration (default: Europe/Kyiv for Ukraine)
+TIMEZONE = os.getenv('TZ', 'Europe/Kyiv')
+try:
+    LOCAL_TZ = pytz.timezone(TIMEZONE)
+except pytz.exceptions.UnknownTimeZoneError:
+    print(f"⚠️ Warning: Unknown timezone '{TIMEZONE}', using UTC")
+    LOCAL_TZ = pytz.UTC
+
 # Content validation settings
 MIN_CONTENT_LENGTH = int(os.getenv('MIN_CONTENT_LENGTH', 1000))  # Minimum bytes expected in response
 REQUIRED_CONTENT = os.getenv('REQUIRED_CONTENT', '')  # Optional: specific text that must be present
@@ -41,9 +50,21 @@ stats = {
     'response_times': [],  # Last 60 response times for rolling average
     'is_up': None,  # Current state: None (unknown), True (up), False (down)
     'down_since': None,  # Timestamp when site went down
-    'last_hourly_report': datetime.now(),
+    'last_hourly_report': datetime.now(LOCAL_TZ),
     'checks_this_hour': 0
 }
+
+
+def get_local_time():
+    """Get current time in configured timezone"""
+    return datetime.now(LOCAL_TZ)
+
+
+def format_timestamp(dt=None):
+    """Format timestamp in local timezone"""
+    if dt is None:
+        dt = get_local_time()
+    return dt.strftime('%Y-%m-%d %H:%M:%S %Z')
 
 
 def send_telegram(message):
@@ -191,7 +212,7 @@ def calculate_avg_response_time():
 
 def send_down_alert(result):
     """Send alert when website goes down"""
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    timestamp = format_timestamp()
 
     # Include content length in alert if available
     content_info = f"\n📏 Content: {result['content_length']} bytes" if result.get('content_length', 0) > 0 else ""
@@ -229,12 +250,12 @@ This is an automated alert from your website monitoring system.
 
 def send_recovery_alert(result):
     """Send alert when website comes back online"""
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    timestamp = format_timestamp()
 
     # Calculate downtime duration
     downtime = 0
     if stats['down_since']:
-        downtime = int((datetime.now() - stats['down_since']).total_seconds())
+        downtime = int((get_local_time() - stats['down_since']).total_seconds())
 
     # Telegram message with HTML formatting
     telegram_msg = f"""
@@ -270,7 +291,7 @@ Your website is back online!
 
 def send_hourly_report():
     """Send hourly status report with statistics"""
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    timestamp = format_timestamp()
     uptime = calculate_uptime()
     avg_response = calculate_avg_response_time()
 
@@ -313,7 +334,7 @@ Time: {timestamp}
 
 def send_startup_notification():
     """Send notification when monitoring starts"""
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    timestamp = format_timestamp()
 
     # Telegram message
     telegram_msg = f"""
@@ -360,7 +381,7 @@ def monitor_loop():
         try:
             # Check website
             result = check_website()
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            timestamp = format_timestamp()
 
             # Update statistics
             stats['total_checks'] += 1
@@ -388,15 +409,15 @@ def monitor_loop():
                 # Check if this is a new outage (was up, now down)
                 if stats['is_up'] is True or stats['is_up'] is None:
                     send_down_alert(result)
-                    stats['down_since'] = datetime.now()
+                    stats['down_since'] = get_local_time()
 
                 stats['is_up'] = False
 
             # Check if it's time for hourly report (every 60 checks, roughly 1 hour with 60s interval)
-            hours_passed = (datetime.now() - stats['last_hourly_report']).total_seconds() / 3600
+            hours_passed = (get_local_time() - stats['last_hourly_report']).total_seconds() / 3600
             if hours_passed >= 1.0:
                 send_hourly_report()
-                stats['last_hourly_report'] = datetime.now()
+                stats['last_hourly_report'] = get_local_time()
                 stats['checks_this_hour'] = 0
 
             # Wait before next check
