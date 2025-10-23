@@ -42,6 +42,9 @@ except pytz.exceptions.UnknownTimeZoneError:
 MIN_CONTENT_LENGTH = int(os.getenv('MIN_CONTENT_LENGTH', 1000))  # Minimum bytes expected in response
 REQUIRED_CONTENT = os.getenv('REQUIRED_CONTENT', '')  # Optional: specific text that must be present
 
+# Report interval in minutes (default: 10 minutes)
+REPORT_INTERVAL_MINUTES = int(os.getenv('REPORT_INTERVAL_MINUTES', 10))
+
 # Statistics tracking
 stats = {
     'total_checks': 0,
@@ -50,8 +53,8 @@ stats = {
     'response_times': [],  # Last 60 response times for rolling average
     'is_up': None,  # Current state: None (unknown), True (up), False (down)
     'down_since': None,  # Timestamp when site went down
-    'last_hourly_report': datetime.now(LOCAL_TZ),
-    'checks_this_hour': 0
+    'last_report_minute': -1,  # Track last report minute to avoid duplicates
+    'checks_this_interval': 0
 }
 
 
@@ -65,6 +68,26 @@ def format_timestamp(dt=None):
     if dt is None:
         dt = get_local_time()
     return dt.strftime('%Y-%m-%d %H:%M:%S %Z')
+
+
+def should_send_report():
+    """
+    Check if it's time to send a report based on clock time
+    Reports are sent at fixed intervals (e.g., :00, :10, :20, :30, etc.)
+    This ensures reports align with the clock, not restart time
+    """
+    now = get_local_time()
+    current_minute = now.minute
+
+    # Check if current minute is a report interval (0, 10, 20, 30, 40, 50)
+    is_report_time = (current_minute % REPORT_INTERVAL_MINUTES) == 0
+
+    # Only send if it's report time AND we haven't sent for this minute yet
+    if is_report_time and stats['last_report_minute'] != current_minute:
+        stats['last_report_minute'] = current_minute
+        return True
+
+    return False
 
 
 def send_telegram(message):
@@ -300,7 +323,7 @@ def send_hourly_report():
 
     # Telegram message
     telegram_msg = f"""
-📊 <b>Hourly Report</b>
+📊 <b>Status Report</b>
 
 🌐 Website: {WEBSITE_URL}
 {status_emoji} Status: {current_status}
@@ -313,9 +336,9 @@ def send_hourly_report():
 """
 
     # Email message
-    email_subject = f"📊 Hourly Report: {WEBSITE_URL}"
+    email_subject = f"📊 Status Report: {WEBSITE_URL}"
     email_body = f"""
-HOURLY STATUS REPORT
+STATUS REPORT
 
 Website: {WEBSITE_URL}
 Current Status: {current_status}
@@ -413,12 +436,10 @@ def monitor_loop():
 
                 stats['is_up'] = False
 
-            # Check if it's time for hourly report (every 60 checks, roughly 1 hour with 60s interval)
-            hours_passed = (get_local_time() - stats['last_hourly_report']).total_seconds() / 3600
-            if hours_passed >= 1.0:
+            # Check if it's time for periodic report (based on clock time, not restart time)
+            if should_send_report():
                 send_hourly_report()
-                stats['last_hourly_report'] = get_local_time()
-                stats['checks_this_hour'] = 0
+                stats['checks_this_interval'] = 0
 
             # Wait before next check
             time.sleep(CHECK_INTERVAL)
