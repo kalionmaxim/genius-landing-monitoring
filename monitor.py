@@ -265,6 +265,39 @@ Time: {timestamp}
     print(f"📊 REPORT | Uptime: {uptime:.2f}% | Avg: {avg_response:.0f}ms | {timestamp}")
 
 
+def send_startup_notification():
+    """Send notification when monitoring starts"""
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    # Telegram message
+    telegram_msg = f"""
+🚀 <b>Monitor Started</b>
+
+🌐 Monitoring: {WEBSITE_URL}
+⏱ Check interval: {CHECK_INTERVAL} seconds
+📊 Hourly reports: Enabled
+⏰ Started at: {timestamp}
+
+Monitoring is now active!
+"""
+
+    # Email message
+    email_subject = f"🚀 Monitor Started: {WEBSITE_URL}"
+    email_body = f"""
+MONITORING STARTED
+
+Website: {WEBSITE_URL}
+Check Interval: {CHECK_INTERVAL} seconds
+Started at: {timestamp}
+
+The monitoring system is now active and will send alerts if the website goes down.
+"""
+
+    send_telegram(telegram_msg)
+    send_email(email_subject, email_body)
+    print(f"📨 Startup notification sent | {timestamp}")
+
+
 def monitor_loop():
     """
     Main monitoring loop
@@ -273,6 +306,9 @@ def monitor_loop():
     print(f"🚀 Starting monitor for {WEBSITE_URL}")
     print(f"⏱ Check interval: {CHECK_INTERVAL}s")
     print("=" * 60)
+
+    # Send startup notification
+    send_startup_notification()
 
     while True:
         try:
